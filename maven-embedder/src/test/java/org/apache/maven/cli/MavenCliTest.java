@@ -24,6 +24,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -32,6 +33,9 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.maven.Maven;
+import org.apache.maven.cli.transfer.ConsoleMavenTransferListener;
+import org.apache.maven.cli.transfer.QuietMavenTransferListener;
+import org.apache.maven.cli.transfer.Slf4jMavenTransferListener;
 import org.apache.maven.eventspy.internal.EventSpyDispatcher;
 import org.apache.maven.execution.MavenExecutionRequest;
 import org.apache.maven.execution.ProfileActivation;
@@ -42,9 +46,13 @@ import org.apache.maven.toolchain.building.ToolchainsBuildingRequest;
 import org.apache.maven.toolchain.building.ToolchainsBuildingResult;
 import org.codehaus.plexus.DefaultPlexusContainer;
 import org.codehaus.plexus.PlexusContainer;
+import org.eclipse.aether.transfer.TransferListener;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InOrder;
 
 import static java.util.Arrays.asList;
@@ -331,6 +339,20 @@ public class MavenCliTest {
         assertFalse(MessageUtils.isColorEnabled());
 
         MessageUtils.setColorEnabled(true);
+        request = new CliRequest(new String[] {"--non-interactive"}, null);
+        cli.cli(request);
+        cli.properties(request);
+        cli.logging(request);
+        assertFalse(MessageUtils.isColorEnabled());
+
+        MessageUtils.setColorEnabled(true);
+        request = new CliRequest(new String[] {"--force-interactive", "--non-interactive"}, null);
+        cli.cli(request);
+        cli.properties(request);
+        cli.logging(request);
+        assertTrue(MessageUtils.isColorEnabled());
+
+        MessageUtils.setColorEnabled(true);
         request = new CliRequest(new String[] {"-l", "target/temp/mvn.log"}, null);
         request.workingDirectory = "target/temp";
         cli.cli(request);
@@ -542,6 +564,68 @@ public class MavenCliTest {
 
         // Assert
         assertThat(request.getUserProperties().getProperty("x"), is("false"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("activateBatchModeArguments")
+    public void activateBatchMode(boolean ciEnv, String[] cliArgs, boolean isBatchMode) throws Exception {
+        CliRequest request = new CliRequest(cliArgs, null);
+        if (ciEnv) request.getSystemProperties().put("env.CI", "true");
+        cli.cli(request);
+
+        boolean batchMode = !cli.populateRequest(request).isInteractiveMode();
+
+        assertThat(batchMode, is(isBatchMode));
+    }
+
+    public static Stream<Arguments> activateBatchModeArguments() {
+        return Stream.of(
+                Arguments.of(false, new String[] {}, false),
+                Arguments.of(true, new String[] {}, true),
+                Arguments.of(true, new String[] {"--force-interactive"}, false),
+                Arguments.of(true, new String[] {"--force-interactive", "--non-interactive"}, false),
+                Arguments.of(true, new String[] {"--force-interactive", "--batch-mode"}, false),
+                Arguments.of(true, new String[] {"--force-interactive", "--non-interactive", "--batch-mode"}, false),
+                Arguments.of(false, new String[] {"--non-interactive"}, true),
+                Arguments.of(false, new String[] {"--batch-mode"}, true),
+                Arguments.of(false, new String[] {"--non-interactive", "--batch-mode"}, true));
+    }
+
+    @ParameterizedTest
+    @MethodSource("calculateTransferListenerArguments")
+    public void calculateTransferListener(boolean ciEnv, String[] cliArgs, Class<TransferListener> expectedSubClass)
+            throws Exception {
+        CliRequest request = new CliRequest(cliArgs, null);
+        if (ciEnv) request.getSystemProperties().put("env.CI", "true");
+        cli.cli(request);
+        cli.logging(request);
+
+        TransferListener transferListener = cli.populateRequest(request).getTransferListener();
+
+        assertThat(transferListener.getClass(), is(expectedSubClass));
+    }
+
+    public static Stream<Arguments> calculateTransferListenerArguments() {
+        return Stream.of(
+                Arguments.of(false, new String[] {}, ConsoleMavenTransferListener.class),
+                Arguments.of(true, new String[] {}, QuietMavenTransferListener.class),
+                Arguments.of(false, new String[] {"-ntp"}, QuietMavenTransferListener.class),
+                Arguments.of(false, new String[] {"--quiet"}, QuietMavenTransferListener.class),
+                Arguments.of(true, new String[] {"--force-interactive"}, ConsoleMavenTransferListener.class),
+                Arguments.of(
+                        true,
+                        new String[] {"--force-interactive", "--non-interactive"},
+                        ConsoleMavenTransferListener.class),
+                Arguments.of(
+                        true, new String[] {"--force-interactive", "--batch-mode"}, ConsoleMavenTransferListener.class),
+                Arguments.of(
+                        true,
+                        new String[] {"--force-interactive", "--non-interactive", "--batch-mode"},
+                        ConsoleMavenTransferListener.class),
+                Arguments.of(false, new String[] {"--non-interactive"}, Slf4jMavenTransferListener.class),
+                Arguments.of(false, new String[] {"--batch-mode"}, Slf4jMavenTransferListener.class),
+                Arguments.of(
+                        false, new String[] {"--non-interactive", "--batch-mode"}, Slf4jMavenTransferListener.class));
     }
 
     private MavenProject createMavenProject(String groupId, String artifactId) {
