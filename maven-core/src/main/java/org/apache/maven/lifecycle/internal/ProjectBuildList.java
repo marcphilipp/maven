@@ -18,7 +18,6 @@
  */
 package org.apache.maven.lifecycle.internal;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,6 +25,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.maven.artifact.ArtifactUtils;
 import org.apache.maven.execution.MavenSession;
@@ -55,13 +55,8 @@ public class ProjectBuildList implements Iterable<ProjectSegment> {
      * @return a project build list for the supplied task segment
      */
     public ProjectBuildList getByTaskSegment(TaskSegment taskSegment) {
-        List<ProjectSegment> currentSegment = new ArrayList<>();
-        for (ProjectSegment projectBuild : items) {
-            if (taskSegment == projectBuild.getTaskSegment()) { // NOTE: There's no notion of taskSegment equality.
-                currentSegment.add(projectBuild);
-            }
-        }
-        return new ProjectBuildList(currentSegment);
+        return new ProjectBuildList(
+                items.stream().filter(pb -> taskSegment == pb.getTaskSegment()).collect(Collectors.toList()));
     }
 
     public Map<MavenProject, ProjectSegment> selectSegment(TaskSegment taskSegment) {
