@@ -40,6 +40,8 @@ public class RawToConsumerPomXMLFilterFactory {
 
         parser = buildPomXMLFilterFactory.get(parser, projectPath);
 
+        // Remove root model attribute
+        parser = new RootXMLFilter(parser);
         // Strip modules
         parser = new ModulesXMLFilter(parser);
         // Adjust relativePath

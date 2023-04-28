@@ -62,6 +62,10 @@ public final class ConsumerPomArtifactTransformer {
     private static final String CONSUMER_POM_CLASSIFIER = "consumer";
 
     public void injectTransformedArtifacts(MavenProject project, RepositorySystemSession session) throws IOException {
+        if (project.getFile() == null) {
+            // If there is no build POM there is no reason to inject artifacts for the consumer POM.
+            return;
+        }
         if (isActive(session)) {
             Path generatedFile;
             String buildDirectory =
@@ -74,6 +78,9 @@ public final class ConsumerPomArtifactTransformer {
                 generatedFile = Files.createTempFile(buildDir, CONSUMER_POM_CLASSIFIER, "pom");
             }
             project.addAttachedArtifact(new ConsumerPomArtifact(project, generatedFile, session));
+        } else if (project.getModel().isRoot()) {
+            throw new IllegalStateException(
+                    "The use of the root attribute on the model requires the buildconsumer feature to be active");
         }
     }
 

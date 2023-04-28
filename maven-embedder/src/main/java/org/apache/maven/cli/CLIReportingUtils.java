@@ -25,7 +25,6 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.Properties;
 
-import org.apache.commons.lang3.StringUtils;
 import org.codehaus.plexus.util.Os;
 import org.slf4j.Logger;
 
@@ -106,7 +105,7 @@ public final class CLIReportingUtils {
         if (rev != null || timestamp != null) {
             msg += " (";
             msg += (rev != null ? rev : "");
-            if (StringUtils.isNotBlank(timestamp)) {
+            if (timestamp != null && !timestamp.isEmpty()) {
                 String ts = formatTimestamp(Long.parseLong(timestamp));
                 msg += (rev != null ? "; " : "") + ts;
             }
@@ -136,6 +135,13 @@ public final class CLIReportingUtils {
     }
 
     public static void showError(Logger logger, String message, Throwable e, boolean showStackTrace) {
+        if (logger == null) {
+            System.err.println(message);
+            if (showStackTrace && e != null) {
+                e.printStackTrace(System.err);
+            }
+            return;
+        }
         if (showStackTrace) {
             logger.error(message, e);
         } else {

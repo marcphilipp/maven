@@ -29,6 +29,8 @@ import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -37,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
+import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -48,7 +51,6 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.UnrecognizedOptionException;
-import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.maven.BuildAbort;
 import org.apache.maven.InternalErrorException;
 import org.apache.maven.Maven;
@@ -88,6 +90,7 @@ import org.apache.maven.lifecycle.LifecycleExecutionException;
 import org.apache.maven.logwrapper.LogLevelRecorder;
 import org.apache.maven.logwrapper.MavenSlf4jWrapperFactory;
 import org.apache.maven.model.building.ModelProcessor;
+import org.apache.maven.model.root.RootLocator;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.properties.internal.EnvironmentUtils;
 import org.apache.maven.properties.internal.SystemProperties;
@@ -323,6 +326,54 @@ public class MavenCli {
                 cliRequest.multiModuleProjectDirectory = basedir.getAbsoluteFile();
             }
         }
+
+        // We need to locate the top level project which may be pointed at using
+        // the -f/--file option.  However, the command line isn't parsed yet, so
+        // we need to iterate through the args to find it and act upon it.
+        Path topDirectory = Paths.get(cliRequest.workingDirectory);
+        boolean isAltFile = false;
+        for (String arg : cliRequest.args) {
+            if (isAltFile) {
+                // this is the argument following -f/--file
+                Path path = Paths.get(arg);
+                if (Files.isDirectory(path)) {
+                    topDirectory = path;
+                } else if (Files.isRegularFile(topDirectory)) {
+                    topDirectory = path.getParent();
+                    if (!Files.isDirectory(topDirectory)) {
+                        System.err.println("Directory " + topDirectory
+                                + " extracted from the -f/--file command-line argument " + arg + " does not exist");
+                        throw new ExitException(1);
+                    }
+                } else {
+                    System.err.println(
+                            "POM file " + arg + " specified with the -f/--file command line argument does not exist");
+                    throw new ExitException(1);
+                }
+                break;
+            } else {
+                // Check if this is the -f/--file option
+                isAltFile = arg.equals(String.valueOf(CLIManager.ALTERNATE_POM_FILE)) || arg.equals("file");
+            }
+        }
+        try {
+            topDirectory = topDirectory.toAbsolutePath().toRealPath();
+        } catch (IOException e) {
+            System.err.println("Error computing real path from " + topDirectory);
+            throw new ExitException(1);
+        }
+        cliRequest.topDirectory = topDirectory;
+        // We're very early in the process and we don't have the container set up yet,
+        // so we rely on the JDK services to eventually lookup a custom RootLocator.
+        // This is used to compute {@code session.rootDirectory} but all {@code project.rootDirectory}
+        // properties will be compute through the RootLocator found in the container.
+        RootLocator rootLocator =
+                ServiceLoader.load(RootLocator.class).iterator().next();
+        Path rootDirectory = rootLocator.findRoot(topDirectory);
+        if (rootDirectory == null) {
+            System.err.println(RootLocator.UNABLE_TO_FIND_ROOT_PROJECT_MESSAGE);
+        }
+        cliRequest.rootDirectory = rootDirectory;
 
         //
         // Make sure the Maven home directory is an absolute path to save us from confusion with say drive-relative
@@ -1192,6 +1243,8 @@ public class MavenCli {
         request.setSystemProperties(cliRequest.systemProperties);
         request.setUserProperties(cliRequest.userProperties);
         request.setMultiModuleProjectDirectory(cliRequest.multiModuleProjectDirectory);
+        request.setRootDirectory(cliRequest.rootDirectory);
+        request.setTopDirectory(cliRequest.topDirectory);
         request.setPom(determinePom(commandLine, workingDirectory, baseDirectory));
         request.setTransferListener(determineTransferListener(quiet, verbose, commandLine, request));
         request.setExecutionListener(determineExecutionListener());
@@ -1452,43 +1505,30 @@ public class MavenCli {
     }
 
     int calculateDegreeOfConcurrency(String threadConfiguration) {
-        if (threadConfiguration.endsWith("C")) {
-            threadConfiguration = threadConfiguration.substring(0, threadConfiguration.length() - 1);
+        try {
+            if (threadConfiguration.endsWith("C")) {
+                String str = threadConfiguration.substring(0, threadConfiguration.length() - 1);
+                float coreMultiplier = Float.parseFloat(str);
 
-            if (!NumberUtils.isParsable(threadConfiguration)) {
-                throw new IllegalArgumentException("Invalid threads core multiplier value: '" + threadConfiguration
-                        + "C'. Supported are int and float values ending with C.");
-            }
+                if (coreMultiplier <= 0.0f) {
+                    throw new IllegalArgumentException("Invalid threads core multiplier value: '" + threadConfiguration
+                            + "'. Value must be positive.");
+                }
 
-            float coreMultiplier = Float.parseFloat(threadConfiguration);
-
-            if (coreMultiplier <= 0.0f) {
-                throw new IllegalArgumentException("Invalid threads core multiplier value: '" + threadConfiguration
-                        + "C'. Value must be positive.");
-            }
-
-            int procs = Runtime.getRuntime().availableProcessors();
-            int threads = (int) (coreMultiplier * procs);
-            return threads == 0 ? 1 : threads;
-        } else {
-            if (!NumberUtils.isParsable(threadConfiguration)) {
-                throw new IllegalArgumentException(
-                        "Invalid threads value: '" + threadConfiguration + "'. Supported are int values.");
-            }
-
-            try {
+                int procs = Runtime.getRuntime().availableProcessors();
+                int threads = (int) (coreMultiplier * procs);
+                return threads == 0 ? 1 : threads;
+            } else {
                 int threads = Integer.parseInt(threadConfiguration);
-
                 if (threads <= 0) {
                     throw new IllegalArgumentException(
                             "Invalid threads value: '" + threadConfiguration + "'. Value must be positive.");
                 }
-
                 return threads;
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
-                        "Invalid threads value: '" + threadConfiguration + "'. Supported are integer values.");
             }
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid threads value: '" + threadConfiguration
+                    + "'. Supported are int and float values ending with C.");
         }
     }
 
