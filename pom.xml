@@ -135,7 +135,7 @@ under the License.
     <plexusInterpolationVersion>1.26</plexusInterpolationVersion>
     <!-- Blocked by 3.4.0+ changes, see MNG-7710 -->
     <plexusUtilsVersion>3.5.1</plexusUtilsVersion>
-    <guiceVersion>5.1.0</guiceVersion>
+    <guiceVersion>6.0.0-rc1</guiceVersion>
     <guavaVersion>31.1-jre</guavaVersion>
     <guavafailureaccessVersion>1.0.1</guavafailureaccessVersion>
     <wagonVersion>3.5.3</wagonVersion>
