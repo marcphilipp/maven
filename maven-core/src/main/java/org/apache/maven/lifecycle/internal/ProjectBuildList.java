@@ -19,12 +19,12 @@
 package org.apache.maven.lifecycle.internal;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.apache.maven.artifact.ArtifactUtils;
@@ -60,13 +60,9 @@ public class ProjectBuildList implements Iterable<ProjectSegment> {
     }
 
     public Map<MavenProject, ProjectSegment> selectSegment(TaskSegment taskSegment) {
-        Map<MavenProject, ProjectSegment> result = new HashMap<>();
-        for (ProjectSegment projectBuild : items) {
-            if (taskSegment == projectBuild.getTaskSegment()) { // NOTE: There's no notion of taskSegment equality.
-                result.put(projectBuild.getProject(), projectBuild);
-            }
-        }
-        return result;
+        return items.stream()
+                .filter(pb -> taskSegment == pb.getTaskSegment())
+                .collect(Collectors.toMap(ProjectSegment::getProject, Function.identity()));
     }
 
     /**
@@ -75,12 +71,10 @@ public class ProjectBuildList implements Iterable<ProjectSegment> {
      * @return The projectSegment or null.
      */
     public ProjectSegment findByMavenProject(MavenProject mavenProject) {
-        for (ProjectSegment projectBuild : items) {
-            if (mavenProject.equals(projectBuild.getProject())) {
-                return projectBuild;
-            }
-        }
-        return null;
+        return items.stream()
+                .filter(pb -> mavenProject.equals(pb.getProject()))
+                .findFirst()
+                .orElse(null);
     }
 
     public Iterator<ProjectSegment> iterator() {
@@ -120,11 +114,6 @@ public class ProjectBuildList implements Iterable<ProjectSegment> {
      * @return a set of all the projects managed by the build
      */
     public Set<MavenProject> getProjects() {
-        Set<MavenProject> projects = new HashSet<>();
-
-        for (ProjectSegment s : items) {
-            projects.add(s.getProject());
-        }
-        return projects;
+        return items.stream().map(ProjectSegment::getProject).collect(Collectors.toSet());
     }
 }
